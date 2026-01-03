@@ -1,5 +1,5 @@
 #!name=京东 pt_key 自动抓取上传
-#!desc=自动抓取 api.m.jd.com 的 Cookie 并提取 pt_key/pt_pin 上传至指定 TG Bot。
+#!desc=自动抓取 api.m.jd.com 的 Cookie 并提取 pt_key/pt_pin 上传至指定 TG Bot(2026-1-3).
 #!system=ios
 
 [MITM]
